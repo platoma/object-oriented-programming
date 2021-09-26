@@ -1,47 +1,111 @@
 ﻿#define _CRT_SECURE_NO_WARNINGS
 #include <bangtal>
-#include <cstring>
 #include <cstdlib>
 #include <ctime>
+#include <Windows.h>
 
 using namespace bangtal;
 
-typedef struct piecepos
-{
-	int x, y;
-} PiecePos;
+ScenePtr scene;
+ObjectPtr game_board[16], game_original[16];
+ObjectPtr start_button;
+ObjectPtr end_button;
+TimerPtr mix_timer;
+TimerPtr loop_timer;
+TimerPtr elapsed_timer;
+int size = 3;
+int blank;
+int mix_count;
+int time_count;
+int best_record = 0;
+float animation_time = 0.05f;
+bool game_completed;
 
-typedef struct piece
-{
-	ObjectPtr object;
-	int correct_pos;
-	int current_pos;
-} Piece;
+int indexToX(int index);
+int indexToY(int index);
+int gameIndex(ObjectPtr piece);
+int randomMove();
+bool checkMove(int index);
+bool checkEnd();
+void gameMove(int index);
+void initGame();
+void startGame();
+void completeGame();
 
-bool checkIn(const Piece piece, const Piece empty)
+int main()
 {
-	if (abs(piece.current_pos - empty.current_pos) == 3 || abs(piece.current_pos - empty.current_pos) == 1)
-	{
-		return true;
-	}
-	else
-	{
-		return false;
-	}
+	srand((unsigned int)time(NULL));
+
+	setGameOption(GameOption::GAME_OPTION_INVENTORY_BUTTON, false);
+	setGameOption(GameOption::GAME_OPTION_MESSAGE_BOX_BUTTON, false);
+
+	initGame();
+
+	startGame(scene);
 }
 
-void changePieces(Piece* piece1, Piece* piece2)
+int indexToX(int index)
 {
-	int temp = piece1->current_pos;
-	piece1->current_pos = piece2->current_pos;
-	piece2->current_pos = temp;
+	return 415 + 150 * (index % size);
 }
 
-bool checkImageCorrect(const Piece puzzle[], int size)
+int indexToY(int index)
+{
+	return 435 - 150 * (index / size);
+}
+
+int gameIndex(ObjectPtr piece)
 {
 	for (int i = 0; i < size * size; i++)
 	{
-		if (puzzle[i].correct_pos != puzzle[i].current_pos)
+		if (game_board[i] == piece)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+int randomMove()
+{
+	int index = rand() % (size * size);
+
+	while (!checkMove(index))
+	{
+		index = rand() % (size * size);
+	}
+
+	return index;
+}
+
+bool checkMove(int index)
+{
+	if (blank / size > 0 && index == blank - size)
+	{
+		return true;
+	}
+	else if (blank / size < size - 1 && index == blank + size)
+	{
+		return true;
+	}
+	else if (blank % size > 0 && index == blank - 1)
+	{
+		return true;
+	}
+	else if (blank % size < size - 1 && index == blank + 1)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+bool checkEnd()
+{
+	for (int i = 0; i < size * size; i++)
+	{
+		if (game_board[i] != game_original[i])
 		{
 			return false;
 		}
@@ -50,267 +114,146 @@ bool checkImageCorrect(const Piece puzzle[], int size)
 	return true;
 }
 
-int main()
+void gameMove(int index)
 {
-	auto scene1 = Scene::create("", "Images/원본.png");
-	auto scene2 = Scene::create("", "Images/배경.png");
-	auto start = Object::create("Images/start.png", scene1, 590, 70);
-	auto end = Object::create("Images/end.png", scene1, 590, 20);
-	auto restart = Object::create("Images/play.png", scene2, 590, 70, false);
-	const int marginx = 415;
-	const int marginy = 135;
-	const int interver = 150;
-	const int size = 3;
-	int empty_piece;
-	bool flag[size * size] = { 0 };
-	PiecePos piece_poses[size * size] = { 0 };
-	Piece puzzle[size * size] = { 0 };
+	auto piece = game_board[index];
 
-	std::srand(static_cast<unsigned int>(std::time(NULL)));
+	game_board[index] = game_board[blank];
+	game_board[blank] = piece;
 
-	empty_piece = rand() % (size * size);
+	game_board[index]->locate(scene, indexToX(index), indexToY(index));
+	game_board[blank]->locate(scene, indexToX(blank), indexToY(blank));
 
-	setGameOption(GameOption::GAME_OPTION_INVENTORY_BUTTON, false);
-	setGameOption(GameOption::GAME_OPTION_MESSAGE_BOX_BUTTON, false);
-	setGameOption(GameOption::GAME_OPTION_ROOM_TITLE, false);
+	blank = index;
+}
 
-	for (int i = 0; i < size; i++)
-	{
-		for (int j = 0; j < size; j++)
-		{
-			piece_poses[i * size + j].x = marginx + interver * j;
-			piece_poses[i * size + j].y = marginy + interver * i;
-		}
-	}
+void initGame()
+{
+	char path[20];
+
+	scene = Scene::create("겨울왕국2 퍼즐", "Images/배경.png");
 
 	for (int i = 0; i < size * size; i++)
 	{
-		int pos;
-		char str[20] = "Images/조각_";
-		char digit[1 + 1] = { static_cast<char>(i) + '0' };
+		sprintf(path, "Images/%d.png", i + 1);
 
-		do
-		{
-			pos = rand() % (size * size);
-		} while (flag[pos] == true);
+		game_board[i] = Object::create(path, scene, indexToX(i), indexToY(i));
 
-		flag[pos] = true;
+		game_board[i]->setOnMouseCallback([&](auto piece, auto x, auto y, auto action)->bool {
+			int index = gameIndex(piece);
 
-		strcat(str, digit);
-		strcat(str, ".png");
+			if (checkMove(index) == true)
+			{
+				gameMove(index);
 
-		if (i == empty_piece)
-		{
-			puzzle[i].object = Object::create(str, scene2, piece_poses[pos].x, piece_poses[pos].y, false);
-		}
-		else
-		{
-			puzzle[i].object = Object::create(str, scene2, piece_poses[pos].x, piece_poses[pos].y);
-		}
-		puzzle[i].correct_pos = i;
-		puzzle[i].current_pos = pos;
+				if (checkEnd())
+				{
+					completeGame();
+				}
+			}
+
+			return true;
+			});
+
+		game_original[i] = game_board[i];
 	}
 
-	start->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		scene2->enter();
+	start_button = Object::create("Images/start.png", scene, 590, 100);
+
+	start_button->setOnMouseCallback([&](auto, auto, auto, auto)->bool {
+		startGame();
 
 		return true;
 		});
 
-	end->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
+	end_button = Object::create("Images/end.png", scene, 590, 50);
+
+	end_button->setOnMouseCallback([&](auto, auto, auto, auto)->bool {
 		endGame();
 
 		return true;
 		});
 
-	puzzle[0].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 0)
+	mix_timer = Timer::create(animation_time);
+
+	mix_timer->setOnTimerCallback([&](auto)->bool {
+		gameMove(randomMove());
+
+		mix_count--;
+		if (mix_count > 0)
 		{
-			if (checkIn(puzzle[0], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[0], &puzzle[empty_piece]);
-				puzzle[0].object->locate(scene2, piece_poses[puzzle[0].current_pos].x, piece_poses[puzzle[0].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+			mix_timer->set(animation_time);
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
+			mix_timer->start();
+		}
+		else
+		{
+			showTimer(elapsed_timer);
 
-				end->show();
-			}
+			loop_timer->set(1.0f);
+
+			loop_timer->start();
 		}
 
 		return true;
 		});
 
-	puzzle[1].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 1)
+	loop_timer = Timer::create(1.0f);
+
+	loop_timer->setOnTimerCallback([&](auto)->bool {
+		if (!game_completed)
 		{
-			if (checkIn(puzzle[1], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[1], &puzzle[empty_piece]);
-				puzzle[1].object->locate(scene2, piece_poses[puzzle[1].current_pos].x, piece_poses[puzzle[1].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+			loop_timer->set(1.0f);
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
+			loop_timer->start();
+			
+			time_count++;
 
-				end->show();
-			}
+			elapsed_timer->increase(1.0f);
 		}
-
+		
 		return true;
 		});
 
-	puzzle[2].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 2)
-		{
-			if (checkIn(puzzle[2], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[2], &puzzle[empty_piece]);
-				puzzle[2].object->locate(scene2, piece_poses[puzzle[2].current_pos].x, piece_poses[puzzle[2].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+	elapsed_timer = Timer::create(0.0f);
+}
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
+void startGame()
+{
+	mix_count = 100;
+	time_count = 0;
+	blank = size * size - 1;
+	game_completed = false;
 
-				end->show();
-			}
-		}
+	game_board[blank]->hide();
 
-		return true;
-		});
+	mix_timer->set(animation_time);
 
-	puzzle[3].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 3)
-		{
-			if (checkIn(puzzle[3], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[3], &puzzle[empty_piece]);
-				puzzle[3].object->locate(scene2, piece_poses[puzzle[3].current_pos].x, piece_poses[puzzle[3].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+	mix_timer->start();
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
+	elapsed_timer->set(0.0f);
 
-				end->show();
-			}
-		}
+	start_button->hide();
+	end_button->hide();
+}
 
-		return true;
-		});
+void completeGame()
+{
+	game_board[blank]->show();
 
-	puzzle[4].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 4)
-		{
-			if (checkIn(puzzle[4], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[4], &puzzle[empty_piece]);
-				puzzle[4].object->locate(scene2, piece_poses[puzzle[4].current_pos].x, piece_poses[puzzle[4].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+	showMessage("Completed!");
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
+	if (!best_record || best_record > time_count)
+	{
+		showMessage("New Record!");
 
-				end->show();
-			}
-		}
+		best_record = time_count;
+	}
 
-		return true;
-		});
+	game_completed = true;
 
-	puzzle[5].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 5)
-		{
-			if (checkIn(puzzle[5], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[5], &puzzle[empty_piece]);
-				puzzle[5].object->locate(scene2, piece_poses[puzzle[5].current_pos].x, piece_poses[puzzle[5].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
+	start_button->setImage("Images/restart.png");
 
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
-
-				end->show();
-			}
-		}
-
-		return true;
-		});
-
-	puzzle[6].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 6)
-		{
-			if (checkIn(puzzle[6], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[6], &puzzle[empty_piece]);
-				puzzle[6].object->locate(scene2, piece_poses[puzzle[6].current_pos].x, piece_poses[puzzle[6].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
-
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
-
-				end->show();
-			}
-		}
-
-		return true;
-		});
-
-	puzzle[7].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 7)
-		{
-			if (checkIn(puzzle[7], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[7], &puzzle[empty_piece]);
-				puzzle[7].object->locate(scene2, piece_poses[puzzle[7].current_pos].x, piece_poses[puzzle[7].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
-
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
-
-				end->show();
-			}
-		}
-
-		return true;
-		});
-
-	puzzle[8].object->setOnMouseCallback([&](ObjectPtr object, int x, int y, MouseAction action)->bool {
-		if (empty_piece != 8)
-		{
-			if (checkIn(puzzle[8], puzzle[empty_piece]) == true)
-			{
-				changePieces(&puzzle[8], &puzzle[empty_piece]);
-				puzzle[8].object->locate(scene2, piece_poses[puzzle[8].current_pos].x, piece_poses[puzzle[8].current_pos].y);
-				puzzle[empty_piece].object->locate(scene2, piece_poses[puzzle[empty_piece].current_pos].x, piece_poses[puzzle[empty_piece].current_pos].y);
-			}
-
-			if (checkImageCorrect(puzzle, size) == true)
-			{
-				showMessage("성공!");
-
-				end->show();
-			}
-		}
-
-		return true;
-		});
-
-	startGame(scene1);
+	start_button->show();
+	end_button->show();
 }
